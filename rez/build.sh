@@ -34,11 +34,24 @@ ENABLE_APP_SANDBOX = NO
 PROVISIONING_PROFILE_SPECIFIER =
 EOF
 
+# Xcode <27 cannot compile .icon assets (Xcode 27 format). Fall back to the
+# legacy AppIcon.appiconset that ships in Assets.xcassets and exclude .icon
+# bundles so actool never sees them.
+XCODE_MAJOR=$(xcodebuild -version | head -1 | sed 's/Xcode //' | cut -d. -f1)
+if [[ "${XCODE_MAJOR}" -lt 27 ]]; then
+    cat >> "${XCCONFIG}" <<'COMPAT'
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO
+EXCLUDED_SOURCE_FILE_NAMES = $(inherited) *.icon
+COMPAT
+fi
+
 # Append the generated static link flags
 GENERATED_XCCONFIG="${REPO_ROOT}/Generated/ThirdParty.generated.xcconfig"
 if [[ -f "${GENERATED_XCCONFIG}" ]]; then
     # Extract OTHER_LDFLAGS from the generated file
-    link_flags=$(rg '^OTHER_LDFLAGS' "${GENERATED_XCCONFIG}" | sd '^OTHER_LDFLAGS\s*=\s*' '' || true)
+    # ponytail: grep/sed, not rg/sd — the rez build env has no Homebrew tools
+    link_flags=$(grep '^OTHER_LDFLAGS' "${GENERATED_XCCONFIG}" | sed 's/^OTHER_LDFLAGS[[:space:]]*=[[:space:]]*//' || true)
     if [[ -n "${link_flags}" ]]; then
         printf 'OTHER_LDFLAGS = %s\n' "${link_flags}" >> "${XCCONFIG}"
     fi
@@ -56,7 +69,7 @@ xcodebuild build \
 
 # ── 3. Install ────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "install" ]]; then
-    APP_PATH=$(fd -t d -d 4 'Tristimulator.app' "${DERIVED}/Build/Products/Release" | head -1)
+    APP_PATH=$(find "${DERIVED}/Build/Products/Release" -maxdepth 4 -type d -name 'Tristimulator.app' | head -1)
     if [[ -z "${APP_PATH}" ]]; then
         echo "ERROR: Tristimulator.app not found in build products" >&2
         exit 1
